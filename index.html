@@ -3,391 +3,551 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Insect Flight Locomotion</title>
+    <title>Limitless Insect Flight & Magic</title>
     
     <!-- A-Frame 1.5.0 library -->
     <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
 
     <script>
-        /**
-         * 0. CUSTOM GRADIENT SKY SHADER
-         * Creates a smooth, beautiful sunset transition without harsh bands.
-         */
+        // =========================================================================
+        // DYNAMIC ATMOSPHERE & ENVIRONMENT
+        // =========================================================================
+
         AFRAME.registerShader('sky-gradient', {
             schema: {
-                colorTop: { type: 'color', default: '#3B185F' },    // Deep twilight purple
-                colorBottom: { type: 'color', default: '#FFB6C1' }  // Soft peach/pink
+                colorTop: { type: 'color', default: '#90CAF9', is: 'uniform' },
+                colorBottom: { type: 'color', default: '#E3F2FD', is: 'uniform' }
             },
-            vertexShader: `
-                varying vec3 vWorldPosition;
-                void main() {
-                    vec4 worldPosition = modelMatrix * vec4(position, 1.0);
-                    vWorldPosition = worldPosition.xyz;
-                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-                }
-            `,
-            fragmentShader: `
-                uniform vec3 colorTop;
-                uniform vec3 colorBottom;
-                varying vec3 vWorldPosition;
-                void main() {
-                    vec3 pointOnSphere = normalize(vWorldPosition.xyz);
-                    // Map Y from [-1, 1] to [0, 1]
-                    float f = (pointOnSphere.y + 1.0) / 2.0; 
-                    // Push the gradient down slightly
-                    f = smoothstep(0.2, 0.8, f); 
-                    gl_FragColor = vec4(mix(colorBottom, colorTop, f), 1.0);
-                }
-            `
+            vertexShader: `varying vec3 vWorldPosition; void main() { vec4 worldPosition = modelMatrix * vec4(position, 1.0); vWorldPosition = worldPosition.xyz; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+            fragmentShader: `uniform vec3 colorTop; uniform vec3 colorBottom; varying vec3 vWorldPosition; void main() { vec3 pointOnSphere = normalize(vWorldPosition.xyz); float f = (pointOnSphere.y + 1.0) / 2.0; f = smoothstep(0.1, 0.7, f); gl_FragColor = vec4(mix(colorBottom, colorTop, f), 1.0); }`
         });
 
-        /**
-         * 1. GIANT INSTANCED FLOWER FIELD
-         * Renders massive tulips (30m tall) to make the player feel insect-sized.
-         */
-        AFRAME.registerComponent('giant-flowers', {
-            init: function () {
-                const count = 3000; // Fewer needed because they are HUGE
-                const range = 400;  // 400m spread
-                
-                // MASSIVE Tulip Stem Geometry
-                const stemGeo = new THREE.CylinderGeometry(0.3, 0.6, 30, 8);
-                stemGeo.translate(0, 15, 0); 
-                const stemMat = new THREE.MeshLambertMaterial({ color: '#5C9E7A' });
-                const stems = new THREE.InstancedMesh(stemGeo, stemMat, count);
-                
-                // MASSIVE Tulip Bulb Geometry (Stretched sphere for soft organic look)
-                const bulbGeo = new THREE.SphereGeometry(3, 16, 16);
-                bulbGeo.scale(1, 1.6, 1); // Stretch vertically into a closed bud
-                bulbGeo.translate(0, 32, 0); // Sit on top of stem
-                const bulbMat = new THREE.MeshLambertMaterial({ color: '#ffffff' }); 
-                const bulbs = new THREE.InstancedMesh(bulbGeo, bulbMat, count);
-
-                const dummy = new THREE.Object3D();
-                const colorObj = new THREE.Color();
-                const palette = ['#FF9A8B', '#FFB6C1', '#FFFACD', '#FFD700', '#FF7E67'];
-
-                for (let i = 0; i < count; i++) {
-                    let x = (Math.random() - 0.5) * range;
-                    let z = (Math.random() - 0.5) * range;
-                    
-                    // Clear a 10m spawn radius
-                    if (Math.abs(x) < 10 && Math.abs(z) < 10) continue;
-
-                    dummy.position.set(x, -2, z); // Sink into ground slightly
-                    
-                    // Organic lean and rotation
-                    dummy.rotation.y = Math.random() * Math.PI * 2;
-                    dummy.rotation.z = (Math.random() - 0.5) * 0.15; 
-                    dummy.rotation.x = (Math.random() - 0.5) * 0.15;
-                    
-                    // Varying sizes
-                    let scale = Math.random() * 0.6 + 0.7;
-                    dummy.scale.set(scale, scale + (Math.random()*0.3), scale);
-                    
-                    dummy.updateMatrix();
-                    stems.setMatrixAt(i, dummy.matrix);
-                    bulbs.setMatrixAt(i, dummy.matrix);
-                    
-                    colorObj.set(palette[Math.floor(Math.random() * palette.length)]);
-                    bulbs.setColorAt(i, colorObj);
+        AFRAME.registerComponent('starry-sky', {
+            init: function() {
+                const count = 1500;
+                const geo = new THREE.BufferGeometry();
+                const pos = new Float32Array(count * 3);
+                for(let i=0; i<count*3; i+=3) {
+                    let vec = new THREE.Vector3(
+                        (Math.random() - 0.5) * 2,
+                        (Math.random() - 0.5) * 2,
+                        (Math.random() - 0.5) * 2
+                    ).normalize().multiplyScalar(400); // 400m radius envelope
+                    pos[i] = vec.x; pos[i+1] = vec.y; pos[i+2] = vec.z;
                 }
-
-                this.el.setObject3D('stems', stems);
-                this.el.setObject3D('bulbs', bulbs);
+                geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+                const mat = new THREE.PointsMaterial({color: '#FFFFFF', size: 1.5, transparent: true, opacity: 0.0});
+                this.points = new THREE.Points(geo, mat);
+                this.el.setObject3D('mesh', this.points);
             }
         });
 
-        /**
-         * 2. GIANT GRASS BLADES
-         * Fills the floor with towering grass (10m tall) to complete the insect scale.
-         */
+        AFRAME.registerComponent('day-night-cycle', {
+            schema: { duration: { type: 'number', default: 120000 } }, // 2 Minute Cycle
+            init: function() {
+                // Tightly controlled, harmonious color palette. No black voids.
+                this.phases = [
+                    // Morning: Light pale sky streaky blue
+                    { pct: 0.00, top: '#64B5F6', bot: '#E3F2FD', fog: '#E3F2FD', amb: '#90A0B0', sunCol: '#FFF8E7', sunInt: 1.2, moonCol: '#88AAFF', moonInt: 0.0 }, 
+                    // Late Morning: Kept light blue with sunlight (No dark blue!)
+                    { pct: 0.20, top: '#42A5F5', bot: '#BBDEFB', fog: '#BBDEFB', amb: '#A0B0C0', sunCol: '#FFFFFF', sunInt: 1.4, moonCol: '#88AAFF', moonInt: 0.0 }, 
+                    // Afternoon: Sunny bright blue
+                    { pct: 0.35, top: '#1E88E5', bot: '#90CAF9', fog: '#90CAF9', amb: '#B0C4DE', sunCol: '#FFFFFF', sunInt: 1.5, moonCol: '#88AAFF', moonInt: 0.0 }, 
+                    // Sunset: Light hazy bluish pink (Harmonious with pink/yellow flowers)
+                    { pct: 0.50, top: '#7986CB', bot: '#F8BBD0', fog: '#F8BBD0', amb: '#9080A0', sunCol: '#FFB6C1', sunInt: 1.0, moonCol: '#88AAFF', moonInt: 0.1 }, 
+                    // Night: Dark blue strictly (Navy envelope, not black)
+                    { pct: 0.75, top: '#0D2040', bot: '#1A3A60', fog: '#1A3A60', amb: '#2A3A5A', sunCol: '#FF8844', sunInt: 0.0, moonCol: '#AACCFF', moonInt: 0.8 }, 
+                    // Sunrise: Hazy bluish pink dawn
+                    { pct: 0.90, top: '#7986CB', bot: '#F8BBD0', fog: '#F8BBD0', amb: '#9080A0', sunCol: '#FFCC88', sunInt: 0.8, moonCol: '#AACCFF', moonInt: 0.2 }, 
+                    // Loop to Morning
+                    { pct: 1.00, top: '#64B5F6', bot: '#E3F2FD', fog: '#E3F2FD', amb: '#90A0B0', sunCol: '#FFF8E7', sunInt: 1.2, moonCol: '#88AAFF', moonInt: 0.0 }  
+                ];
+                this.c1 = new THREE.Color(); 
+                this.c2 = new THREE.Color();
+            },
+            tick: function(time) {
+                if (!this.sun) this.sun = document.querySelector('#orbiting-sun');
+                if (!this.moon) this.moon = document.querySelector('#orbiting-moon');
+                if (!this.dirLight) this.dirLight = document.querySelector('#sun-light');
+                if (!this.moonLight) this.moonLight = document.querySelector('#moon-light');
+                if (!this.ambLight) this.ambLight = document.querySelector('#ambient-light');
+                if (!this.sky) this.sky = document.querySelector('a-sky');
+                if (!this.stars) this.stars = document.querySelector('[starry-sky]');
+                
+                if (!this.sun || !this.moon || !this.dirLight || !this.moonLight || !this.ambLight || !this.sky || !this.el.sceneEl) return;
+
+                let cycleTime = (time % this.data.duration) / this.data.duration;
+                
+                let theta = cycleTime * Math.PI * 2;
+                let orbitRadius = 250;
+                
+                this.sun.object3D.position.y = Math.cos(theta) * orbitRadius;
+                this.sun.object3D.position.z = Math.sin(theta) * orbitRadius;
+                this.dirLight.object3D.position.copy(this.sun.object3D.position);
+
+                this.moon.object3D.position.y = Math.cos(theta + Math.PI) * orbitRadius;
+                this.moon.object3D.position.z = Math.sin(theta + Math.PI) * orbitRadius;
+                this.moonLight.object3D.position.copy(this.moon.object3D.position);
+
+                let pStart = this.phases[0], pEnd = this.phases[1];
+                for(let i=0; i<this.phases.length-1; i++) {
+                    if(cycleTime >= this.phases[i].pct && cycleTime <= this.phases[i+1].pct) {
+                        pStart = this.phases[i]; pEnd = this.phases[i+1]; break;
+                    }
+                }
+
+                let range = pEnd.pct - pStart.pct;
+                let lerpFactor = (cycleTime - pStart.pct) / range;
+
+                // Return a HEX string, allowing us to safely use A-Frame's setAttribute
+                const mixColorHex = (hex1, hex2, f) => {
+                    this.c1.set(hex1); this.c2.set(hex2);
+                    this.c1.lerp(this.c2, f);
+                    return '#' + this.c1.getHexString();
+                };
+
+                let topColor = mixColorHex(pStart.top, pEnd.top, lerpFactor);
+                let botColor = mixColorHex(pStart.bot, pEnd.bot, lerpFactor);
+
+                // Safe update pipeline for the sky shader
+                this.sky.setAttribute('material', 'colorTop', topColor);
+                this.sky.setAttribute('material', 'colorBottom', botColor);
+
+                // Update Fog safely
+                if (this.el.sceneEl.object3D.fog) {
+                    this.el.sceneEl.object3D.fog.color.set(mixColorHex(pStart.fog, pEnd.fog, lerpFactor));
+                }
+
+                let dl = this.dirLight.getObject3D('light');
+                let ml = this.moonLight.getObject3D('light');
+                let al = this.ambLight.getObject3D('light');
+                
+                if (dl && ml && al) {
+                    dl.color.set(mixColorHex(pStart.sunCol, pEnd.sunCol, lerpFactor));
+                    dl.intensity = pStart.sunInt + (pEnd.sunInt - pStart.sunInt) * lerpFactor;
+                    
+                    ml.color.set(mixColorHex(pStart.moonCol, pEnd.moonCol, lerpFactor));
+                    ml.intensity = pStart.moonInt + (pEnd.moonInt - pStart.moonInt) * lerpFactor;
+                    
+                    al.color.set(mixColorHex(pStart.amb, pEnd.amb, lerpFactor));
+                }
+
+                if (this.stars && this.stars.getObject3D('mesh')) {
+                    let currentSunInt = pStart.sunInt + (pEnd.sunInt - pStart.sunInt) * lerpFactor;
+                    let starMat = this.stars.getObject3D('mesh').material;
+                    starMat.opacity = Math.max(0, 1.0 - (currentSunInt * 1.5)); 
+                }
+            }
+        });
+
+        AFRAME.registerComponent('milky-clouds', {
+            init: function() {
+                const cloudCount = 25; this.range = 700;
+                // Emissive added to ensure clouds don't look like black holes at night!
+                const cloudMat = new THREE.MeshLambertMaterial({ color: '#FFFFFF', emissive: '#FFFFFF', emissiveIntensity: 0.15, transparent: true, opacity: 0.85 });
+                this.clouds = [];
+                for(let i=0; i<cloudCount; i++) {
+                    const group = new THREE.Group();
+                    group.position.set((Math.random()-0.5)*this.range, Math.random()*40 + 130, (Math.random()-0.5)*this.range);
+                    const puffs = Math.floor(Math.random()*5)+6;
+                    for(let j=0; j<puffs; j++) {
+                        const geo = new THREE.SphereGeometry(Math.random()*20+15, 16, 16);
+                        const puff = new THREE.Mesh(geo, cloudMat);
+                        puff.position.set((Math.random()-0.5)*40, (Math.random()-0.5)*15, (Math.random()-0.5)*40);
+                        group.add(puff);
+                    }
+                    group.userData.speedX = (Math.random()*0.5 + 0.2) * (Math.random() > 0.5 ? 1 : -1);
+                    group.userData.speedZ = (Math.random()*0.5 + 0.2) * (Math.random() > 0.5 ? 1 : -1);
+                    this.el.setObject3D('cloud_' + i, group); this.clouds.push(group);
+                }
+            },
+            tick: function(time, timeDelta) {
+                if (!this.rig) this.rig = document.querySelector('#rig');
+                if (!this.rig || !this.rig.object3D) return;
+
+                let dt = timeDelta / 1000; if (dt > 0.1) dt = 0.1;
+                const rigPos = this.rig.object3D.position;
+
+                for(let c of this.clouds) {
+                    c.position.x += c.userData.speedX * dt * 5; c.position.z += c.userData.speedZ * dt * 5;
+                    let dx = c.position.x - rigPos.x; let dz = c.position.z - rigPos.z;
+                    if (dx > this.range/2) c.position.x -= this.range; if (dx < -this.range/2) c.position.x += this.range;
+                    if (dz > this.range/2) c.position.z -= this.range; if (dz < -this.range/2) c.position.z += this.range;
+                }
+            }
+        });
+
+        AFRAME.registerComponent('giant-flowers', {
+            init: function () {
+                const count = 3000; const range = 400; 
+                const stemGeo = new THREE.CylinderGeometry(0.3, 0.6, 30, 8); stemGeo.translate(0, 15, 0); 
+                const stemMat = new THREE.MeshLambertMaterial({ color: '#5C9E7A' }); const stems = new THREE.InstancedMesh(stemGeo, stemMat, count);
+                const bulbGeo = new THREE.SphereGeometry(3, 16, 16); bulbGeo.scale(1, 1.6, 1); bulbGeo.translate(0, 32, 0); 
+                const bulbMat = new THREE.MeshLambertMaterial({ color: '#ffffff' }); const bulbs = new THREE.InstancedMesh(bulbGeo, bulbMat, count);
+                const dummy = new THREE.Object3D(); const colorObj = new THREE.Color();
+                const palette = ['#FF9A8B', '#FFB6C1', '#FFFACD', '#FFD700', '#FF7E67'];
+                
+                for (let i = 0; i < count; i++) {
+                    let x = (Math.random() - 0.5) * range; let z = (Math.random() - 0.5) * range;
+                    if (Math.abs(x) < 15 && Math.abs(z) < 15) continue;
+                    dummy.position.set(x, -2, z); dummy.rotation.set((Math.random()-0.5)*0.15, Math.random()*Math.PI*2, (Math.random()-0.5)*0.15);
+                    let scale = Math.random() * 0.6 + 0.7; dummy.scale.set(scale, scale + (Math.random()*0.3), scale);
+                    dummy.updateMatrix(); stems.setMatrixAt(i, dummy.matrix); bulbs.setMatrixAt(i, dummy.matrix);
+                    colorObj.set(palette[Math.floor(Math.random() * palette.length)]); bulbs.setColorAt(i, colorObj);
+                }
+                this.el.setObject3D('stems', stems); this.el.setObject3D('bulbs', bulbs);
+            }
+        });
+
         AFRAME.registerComponent('giant-grass', {
             init: function() {
-                const count = 15000;
-                const range = 300;
-                
-                // Blade geometry
-                const grassGeo = new THREE.ConeGeometry(0.4, 12, 4);
-                grassGeo.translate(0, 6, 0);
-                const grassMat = new THREE.MeshLambertMaterial({ color: '#4A7C59' });
-                const grass = new THREE.InstancedMesh(grassGeo, grassMat, count);
-                
+                const count = 15000; const range = 300;
+                const grassGeo = new THREE.ConeGeometry(0.4, 12, 4); grassGeo.translate(0, 6, 0);
+                const grassMat = new THREE.MeshLambertMaterial({ color: '#4A7C59' }); const grass = new THREE.InstancedMesh(grassGeo, grassMat, count);
                 const dummy = new THREE.Object3D();
+                
                 for(let i=0; i<count; i++) {
-                    let x = (Math.random() - 0.5) * range;
-                    let z = (Math.random() - 0.5) * range;
-                    dummy.position.set(x, -1, z);
-                    
-                    // Bend grass in random directions
-                    dummy.rotation.y = Math.random() * Math.PI * 2;
-                    dummy.rotation.x = (Math.random() - 0.5) * 0.4;
-                    dummy.rotation.z = (Math.random() - 0.5) * 0.4;
-                    dummy.scale.setScalar(Math.random() * 0.5 + 0.5);
-                    
-                    dummy.updateMatrix();
-                    grass.setMatrixAt(i, dummy.matrix);
+                    let x = (Math.random() - 0.5) * range; let z = (Math.random() - 0.5) * range;
+                    if (Math.abs(x) < 10 && Math.abs(z) < 10) continue;
+                    dummy.position.set(x, -1, z); dummy.rotation.set((Math.random()-0.5)*0.4, Math.random()*Math.PI*2, (Math.random()-0.5)*0.4);
+                    dummy.scale.setScalar(Math.random() * 0.5 + 0.5); dummy.updateMatrix(); grass.setMatrixAt(i, dummy.matrix);
                 }
                 this.el.setObject3D('grass', grass);
             }
         });
 
-        /**
-         * 3. FLOATING FIREFLIES / SPORES (Low-Mid Level detail)
-         */
         AFRAME.registerComponent('fireflies', {
             init: function() {
-                this.count = 400;
-                this.range = 80;
-                const geo = new THREE.SphereGeometry(0.1, 8, 8); // Large glowing orbs
-                const mat = new THREE.MeshBasicMaterial({ color: '#FFFACD', transparent: true, opacity: 0.8 });
+                this.count = 500; this.range = 80;
+                const geo = new THREE.SphereGeometry(0.04, 8, 8); 
+                const mat = new THREE.MeshBasicMaterial({ color: '#FFFACD', transparent: true, opacity: 0.9, blending: THREE.AdditiveBlending });
                 this.mesh = new THREE.InstancedMesh(geo, mat, this.count);
-                
-                this.dummy = new THREE.Object3D();
-                this.offsets = new Float32Array(this.count); // For bobbing animation
+                this.dummy = new THREE.Object3D(); this.offsets = new Float32Array(this.count); this.driftSpeeds = new Float32Array(this.count * 3);
                 
                 for(let i=0; i<this.count; i++) {
-                    let x = (Math.random() - 0.5) * this.range;
-                    let y = Math.random() * 15 + 1; // Hover between 1m and 16m high
-                    let z = (Math.random() - 0.5) * this.range;
-                    this.dummy.position.set(x, y, z);
-                    this.dummy.updateMatrix();
-                    this.mesh.setMatrixAt(i, this.dummy.matrix);
+                    this.dummy.position.set((Math.random()-0.5)*this.range, Math.random()*15+1, (Math.random()-0.5)*this.range);
+                    this.dummy.updateMatrix(); this.mesh.setMatrixAt(i, this.dummy.matrix);
                     this.offsets[i] = Math.random() * Math.PI * 2;
+                    this.driftSpeeds[i*3] = (Math.random()-0.5)*0.8; this.driftSpeeds[i*3+1] = (Math.random()-0.5)*0.2; this.driftSpeeds[i*3+2] = (Math.random()-0.5)*0.8;
                 }
                 this.el.setObject3D('mesh', this.mesh);
             },
             tick: function(time) {
-                const rigPos = document.querySelector('#rig').object3D.position;
+                if (!this.rig) this.rig = document.querySelector('#rig');
+                if (!this.rig || !this.rig.object3D) return;
+
+                const rigPos = this.rig.object3D.position; 
                 const t = time * 0.001;
                 
                 for(let i=0; i<this.count; i++) {
-                    this.mesh.getMatrixAt(i, this.dummy.matrix);
-                    this.dummy.position.setFromMatrixPosition(this.dummy.matrix);
-                    
-                    // Gentle vertical bobbing
-                    this.dummy.position.y += Math.sin(t * 2.0 + this.offsets[i]) * 0.01;
-                    
-                    // Wrap around player
-                    let dx = this.dummy.position.x - rigPos.x;
-                    let dz = this.dummy.position.z - rigPos.z;
-                    if (dx > this.range/2) this.dummy.position.x -= this.range;
-                    if (dx < -this.range/2) this.dummy.position.x += this.range;
-                    if (dz > this.range/2) this.dummy.position.z -= this.range;
-                    if (dz < -this.range/2) this.dummy.position.z += this.range;
-
-                    this.dummy.updateMatrix();
-                    this.mesh.setMatrixAt(i, this.dummy.matrix);
+                    this.mesh.getMatrixAt(i, this.dummy.matrix); this.dummy.position.setFromMatrixPosition(this.dummy.matrix);
+                    this.dummy.position.x += Math.sin(t * this.driftSpeeds[i*3] + this.offsets[i]) * 0.05;
+                    this.dummy.position.y += Math.sin(t * 2.0 + this.offsets[i]) * 0.01 + (this.driftSpeeds[i*3+1] * 0.01);
+                    this.dummy.position.z += Math.cos(t * this.driftSpeeds[i*3+2] + this.offsets[i]) * 0.05;
+                    this.dummy.scale.setScalar(0.3 + ((Math.sin(t*3.0+this.offsets[i])+1.0)*0.5) * 1.8);
+                    let dx = this.dummy.position.x - rigPos.x; let dz = this.dummy.position.z - rigPos.z;
+                    if (dx > this.range/2) this.dummy.position.x -= this.range; if (dx < -this.range/2) this.dummy.position.x += this.range;
+                    if (dz > this.range/2) this.dummy.position.z -= this.range; if (dz < -this.range/2) this.dummy.position.z += this.range;
+                    this.dummy.updateMatrix(); this.mesh.setMatrixAt(i, this.dummy.matrix);
                 }
                 this.mesh.instanceMatrix.needsUpdate = true;
             }
         });
 
-        /**
-         * 4. GIANT TREES (High Level Composition)
-         */
-        AFRAME.registerComponent('giant-trees', {
+        // =========================================================================
+        // FAIRY LUMINA PHENOMENA (Sparkle Explosion)
+        // =========================================================================
+        AFRAME.registerComponent('lumina-sparkles', {
             init: function() {
-                const numTrees = 15;
-                for (let i = 0; i < numTrees; i++) {
-                    let tree = document.createElement('a-entity');
-                    
-                    let x = (Math.random() - 0.5) * 350;
-                    let z = (Math.random() - 0.5) * 350;
-                    if (Math.abs(x) < 40 && Math.abs(z) < 40) continue; // Keep center somewhat open
-                    
-                    tree.setAttribute('position', { x: x, y: 0, z: z });
-                    
-                    // Massive Trunk
-                    let trunk = document.createElement('a-cylinder');
-                    trunk.setAttribute('radius', Math.random() * 4 + 4);
-                    trunk.setAttribute('height', 120);
-                    trunk.setAttribute('position', '0 60 0');
-                    trunk.setAttribute('color', '#3E2723');
-                    trunk.setAttribute('roughness', '1.0');
-                    
-                    // Massive Canopy (Soft sphere)
-                    let canopy = document.createElement('a-sphere');
-                    canopy.setAttribute('radius', Math.random() * 15 + 25);
-                    canopy.setAttribute('position', '0 115 0');
-                    canopy.setAttribute('color', '#2E4C38');
-                    canopy.setAttribute('roughness', '0.9');
+                this.count = 150;
+                const geo = new THREE.OctahedronGeometry(0.02);
+                const mat = new THREE.MeshBasicMaterial({ color: '#FFFACD', transparent: true, opacity: 1.0, blending: THREE.AdditiveBlending });
+                this.mesh = new THREE.InstancedMesh(geo, mat, this.count);
+                
+                this.dummy = new THREE.Object3D();
+                this.velocities = []; this.lifetimes = []; this.active = false;
 
-                    tree.appendChild(trunk);
-                    tree.appendChild(canopy);
-                    this.el.appendChild(tree);
+                for(let i=0; i<this.count; i++) {
+                    this.velocities.push(new THREE.Vector3()); this.lifetimes.push(0);
+                    this.dummy.scale.set(0,0,0); this.dummy.updateMatrix(); this.mesh.setMatrixAt(i, this.dummy.matrix);
+                }
+                this.el.setObject3D('mesh', this.mesh);
+                
+                this.el.addEventListener('fire-sparkles', (e) => {
+                    let pos = e.detail.position; this.active = true;
+                    for(let i=0; i<this.count; i++) {
+                        this.dummy.position.copy(pos);
+                        let v = new THREE.Vector3(Math.random()-0.5, Math.random()-0.5, Math.random()-0.5).normalize();
+                        v.multiplyScalar(Math.random() * 4 + 1);
+                        this.velocities[i].copy(v);
+                        this.lifetimes[i] = Math.random() * 1.5 + 0.5;
+                        this.dummy.scale.setScalar(1); this.dummy.updateMatrix(); this.mesh.setMatrixAt(i, this.dummy.matrix);
+                    }
+                    this.mesh.instanceMatrix.needsUpdate = true;
+                });
+            },
+            tick: function(time, timeDelta) {
+                if(!this.active) return;
+                let dt = timeDelta / 1000; if (dt > 0.1) dt = 0.1;
+                let allDead = true;
+                for(let i=0; i<this.count; i++) {
+                    if(this.lifetimes[i] > 0) {
+                        allDead = false; this.lifetimes[i] -= dt;
+                        this.mesh.getMatrixAt(i, this.dummy.matrix); this.dummy.position.setFromMatrixPosition(this.dummy.matrix);
+                        
+                        this.dummy.position.addScaledVector(this.velocities[i], dt);
+                        this.velocities[i].multiplyScalar(0.92); 
+                        this.velocities[i].y += 0.8 * dt; 
+                        
+                        let scale = Math.max(0, this.lifetimes[i]); this.dummy.scale.set(scale, scale, scale);
+                        this.dummy.updateMatrix(); this.mesh.setMatrixAt(i, this.dummy.matrix);
+                    }
+                }
+                this.mesh.instanceMatrix.needsUpdate = true;
+                if(allDead) this.active = false;
+            }
+        });
+
+        // =========================================================================
+        // PHYSICS, GRABBING, MAGIC & LOCOMOTION
+        // =========================================================================
+        AFRAME.registerComponent('nectar-physics', {
+            schema: { bounce: { default: 0.7 }, gravity: { default: -9.8 }, floorY: { default: 0.25 } },
+            init: function() { this.velocity = new THREE.Vector3(0,0,0); },
+            tick: function(time, timeDelta) {
+                if (this.el.getAttribute('data-grabbed') === 'true') return;
+                
+                let dt = timeDelta / 1000; if (dt > 0.1) dt = 0.1;
+                let throwVel = this.el.getAttribute('data-throw-velocity');
+                
+                if (throwVel && typeof throwVel === 'string') {
+                    let parts = throwVel.split(' ').map(Number); 
+                    if (parts.length === 3) this.velocity.set(parts[0], parts[1], parts[2]); 
+                    this.el.removeAttribute('data-throw-velocity');
+                }
+                
+                this.velocity.y += this.data.gravity * dt;
+                let pos = this.el.object3D.position;
+                pos.x += this.velocity.x * dt; pos.y += this.velocity.y * dt; pos.z += this.velocity.z * dt;
+                
+                if (pos.y < this.data.floorY) {
+                    pos.y = this.data.floorY; this.velocity.y *= -this.data.bounce; this.velocity.x *= 0.85; this.velocity.z *= 0.85;
                 }
             }
         });
 
-        /**
-         * 5. SEAMLESS SUPERMAN GLIDE (Scaled up for huge world)
-         */
-        AFRAME.registerComponent('superman-flight', {
-            schema: {
-                maxSpeed: { type: 'number', default: 45.0 }, // Increased speed for giant world
-                acceleration: { type: 'number', default: 15.0 },
-                damping: { type: 'number', default: 0.94 }
-            },
-
-            init: function () {
-                this.activeHand = null;
-                this.isFlying = false;
-                this.velocity = new THREE.Vector3();
-                this.flightDir = new THREE.Vector3();
-                this.camera = document.querySelector('#camera');
+        AFRAME.registerComponent('hand-grabber', {
+            init: function() {
+                this.grabbedEl = null; this.prevPos = new THREE.Vector3(); this.throwVelocity = new THREE.Vector3(); this.grabRadius = 0.3; 
                 
-                this.onPinchStart = this.onPinchStart.bind(this);
-                this.onPinchEnd = this.onPinchEnd.bind(this);
-            },
+                this.el.addEventListener('pinchstarted', (evt) => {
+                    if (!this.el.object3D) return;
+                    let handPos = new THREE.Vector3(); this.el.object3D.getWorldPosition(handPos);
+                    let orbs = document.querySelectorAll('.grabbable');
+                    let closest = null; let minDistance = this.grabRadius;
+                    
+                    orbs.forEach(orb => {
+                        if(!orb.object3D) return;
+                        let orbPos = new THREE.Vector3(); orb.object3D.getWorldPosition(orbPos);
+                        let dist = handPos.distanceTo(orbPos);
+                        if (dist < minDistance && orb.getAttribute('data-grabbed') !== 'true') { minDistance = dist; closest = orb; }
+                    });
+                    
+                    if (closest) {
+                        this.grabbedEl = closest; this.grabbedEl.setAttribute('data-grabbed', 'true'); this.el.setAttribute('data-grabbing', 'true'); 
+                    }
+                });
 
-            play: function () {
-                const attachEvents = (hand) => {
-                    hand.addEventListener('pinchstarted', this.onPinchStart);
-                    hand.addEventListener('pinchended', this.onPinchEnd);
-                };
-
-                document.querySelectorAll('[hand-tracking-controls]').forEach(attachEvents);
-                this.el.sceneEl.addEventListener('child-attached', (evt) => {
-                    if (evt.detail.el.hasAttribute('hand-tracking-controls')) {
-                        attachEvents(evt.detail.el);
+                this.el.addEventListener('pinchended', () => {
+                    if (this.grabbedEl) {
+                        this.grabbedEl.setAttribute('data-grabbed', 'false');
+                        this.grabbedEl.setAttribute('data-throw-velocity', `${this.throwVelocity.x} ${this.throwVelocity.y} ${this.throwVelocity.z}`);
+                        this.grabbedEl = null; this.el.removeAttribute('data-grabbing');
                     }
                 });
             },
+            tick: function(time, timeDelta) {
+                if (!this.el.object3D) return;
+                
+                let currentPos = new THREE.Vector3(); this.el.object3D.getWorldPosition(currentPos);
+                let dt = timeDelta / 1000;
+                
+                if(dt > 0 && dt < 0.1) this.throwVelocity.subVectors(currentPos, this.prevPos).divideScalar(dt);
+                this.prevPos.copy(currentPos);
+                
+                if (this.grabbedEl && this.el.sceneEl) {
+                    this.el.sceneEl.object3D.updateMatrixWorld();
+                    let localPos = this.el.sceneEl.object3D.worldToLocal(currentPos.clone()); 
+                    this.grabbedEl.setAttribute('position', localPos);
+                }
+            }
+        });
 
+        AFRAME.registerComponent('gesture-magic', {
+            init: function() {
+                this.cooldown = 0;
+            },
+            tick: function(time, timeDelta) {
+                // Safe Lazy Loading for Gestures
+                if (!this.left) this.left = document.querySelector('#leftHand');
+                if (!this.right) this.right = document.querySelector('#rightHand');
+                if (!this.shockwave) this.shockwave = document.querySelector('#magic-shockwave');
+                if (!this.sparkles) this.sparkles = document.querySelector('#lumina-system');
+                
+                if (!this.left || !this.left.object3D || !this.right || !this.right.object3D || !this.shockwave || !this.sparkles) return;
+                
+                let dt = timeDelta / 1000; if(this.cooldown > 0) this.cooldown -= dt;
+                let pL = new THREE.Vector3(); let pR = new THREE.Vector3();
+                this.left.object3D.getWorldPosition(pL); this.right.object3D.getWorldPosition(pR);
+
+                let dist = pL.distanceTo(pR);
+                
+                if (dist > 0.01 && dist < 0.10 && this.cooldown <= 0) { 
+                    this.cooldown = 2.0; 
+                    let cx = (pL.x + pR.x) / 2; let cy = (pL.y + pR.y) / 2; let cz = (pL.z + pR.z) / 2;
+                    let centerPos = new THREE.Vector3(cx, cy, cz);
+                    
+                    this.shockwave.setAttribute('position', `${cx} ${cy} ${cz}`);
+                    this.shockwave.emit('fire-shockwave', null, false);
+                    this.sparkles.emit('fire-sparkles', { position: centerPos }, false);
+                }
+            }
+        });
+
+        AFRAME.registerComponent('superman-flight', {
+            schema: { maxSpeed: { type: 'number', default: 45.0 }, acceleration: { type: 'number', default: 15.0 }, damping: { type: 'number', default: 0.94 } },
+            init: function () {
+                this.activeHand = null; this.isFlying = false; this.velocity = new THREE.Vector3(); this.flightDir = new THREE.Vector3();
+                this.onPinchStart = this.onPinchStart.bind(this); this.onPinchEnd = this.onPinchEnd.bind(this);
+            },
+            play: function () {
+                const attachEvents = (hand) => { hand.addEventListener('pinchstarted', this.onPinchStart); hand.addEventListener('pinchended', this.onPinchEnd); };
+                document.querySelectorAll('[hand-tracking-controls]').forEach(attachEvents);
+                this.el.sceneEl.addEventListener('child-attached', (evt) => { if (evt.detail.el.hasAttribute('hand-tracking-controls')) attachEvents(evt.detail.el); });
+            },
             onPinchStart: function (evt) {
                 if (this.isFlying) return; 
-                this.activeHand = evt.target;
-                this.isFlying = true;
+                setTimeout(() => {
+                    if (evt.target.getAttribute('data-grabbing') === 'true') return; 
+                    this.activeHand = evt.target; this.isFlying = true;
+                }, 10);
             },
-
             onPinchEnd: function (evt) {
-                if (this.activeHand === evt.target) {
-                    this.isFlying = false;
-                    this.activeHand = null;
-                }
+                if (this.activeHand === evt.target) { this.isFlying = false; this.activeHand = null; }
             },
-            
             tick: function (time, timeDelta) {
-                let dt = timeDelta / 1000;
-                if (dt > 0.1) dt = 0.1;
+                if (!this.camera) this.camera = document.querySelector('#camera');
+                if (!this.camera || !this.camera.object3D || !this.el.object3D) return;
 
-                if (this.isFlying && this.activeHand) {
-                    let headPos = new THREE.Vector3();
-                    this.camera.object3D.getWorldPosition(headPos);
-                    
-                    let handPos = new THREE.Vector3();
-                    this.activeHand.object3D.getWorldPosition(handPos);
-
+                let dt = timeDelta / 1000; if (dt > 0.1) dt = 0.1;
+                
+                if (this.isFlying && this.activeHand && this.activeHand.object3D) {
+                    let headPos = new THREE.Vector3(); this.camera.object3D.getWorldPosition(headPos);
+                    let handPos = new THREE.Vector3(); this.activeHand.object3D.getWorldPosition(handPos);
                     this.flightDir.subVectors(handPos, headPos);
                     
-                    let stretch = this.flightDir.length(); 
-                    this.flightDir.normalize();
-
-                    // Deadzone 20cm, Max thrust at 50cm
-                    let throttle = 0;
-                    if (stretch > 0.2) {
-                        throttle = Math.min((stretch - 0.2) / 0.3, 1.0); 
-                    }
-
+                    let stretch = this.flightDir.length(); this.flightDir.normalize();
+                    let throttle = stretch > 0.2 ? Math.min((stretch - 0.2) / 0.3, 1.0) : 0;
                     let targetVelocity = this.flightDir.multiplyScalar(this.data.maxSpeed * throttle);
                     this.velocity.lerp(targetVelocity, dt * this.data.acceleration);
-                    
                 } else {
-                    let friction = Math.pow(this.data.damping, dt * 60);
-                    this.velocity.multiplyScalar(friction);
+                    let friction = Math.pow(this.data.damping, dt * 60); this.velocity.multiplyScalar(friction);
                 }
-
+                
                 if (this.velocity.lengthSq() > 0.001) {
-                    let moveStep = this.velocity.clone().multiplyScalar(dt);
-                    this.el.object3D.position.add(moveStep);
+                    let moveStep = this.velocity.clone().multiplyScalar(dt); this.el.object3D.position.add(moveStep);
                 }
-
+                
                 let pos = this.el.object3D.position;
-                if (pos.y < 0) {
-                    pos.y = 0;
-                    this.velocity.y = 0;
-                }
-                if (pos.y > 150) { // Ceiling height
-                    pos.y = 150;
-                    this.velocity.y = 0;
-                }
+                if (pos.y < 0) { pos.y = 0; this.velocity.y = 0; }
+                if (pos.y > 180) { pos.y = 180; this.velocity.y = 0; }
             }
         });
     </script>
 </head>
 <body>
-    <a-scene 
-        fog="type: exponential; color: #FFA07A; density: 0.008;" 
-        webxr="optionalFeatures: hand-tracking;">
+    <a-scene day-night-cycle="duration: 120000" fog="type: exponential; density: 0.015;" webxr="optionalFeatures: hand-tracking;">
         
-        <!-- ========================================== -->
-        <!-- ATMOSPHERE & LIGHTING                      -->
-        <!-- ========================================== -->
+        <a-entity gesture-magic></a-entity>
+
+        <!-- Dynamic Lighting & Sky Engine -->
+        <a-sky material="shader: sky-gradient; side: back; colorTop: #90CAF9; colorBottom: #E3F2FD;"></a-sky>
         
-        <!-- Custom Sunset Gradient Sky -->
-        <a-sky material="shader: sky-gradient; side: back;"></a-sky>
+        <!-- The Stars Envelope -->
+        <a-entity starry-sky></a-entity>
+        
+        <!-- REMOVED <a-sphere> elements to completely eliminate the black hole rendering bug! -->
+        <a-entity id="orbiting-sun" position="0 250 0">
+            <a-light id="sun-light" type="directional" color="#FFFFFF" intensity="1.4" castShadow="false"></a-light>
+        </a-entity>
+        
+        <!-- The Moon Orbit -->
+        <a-entity id="orbiting-moon" position="0 -250 0">
+            <a-light id="moon-light" type="directional" color="#AACCFF" intensity="0.0" castShadow="false"></a-light>
+        </a-entity>
+        
+        <a-light id="ambient-light" type="ambient" color="#FFDAB9" intensity="0.8"></a-light>
 
-        <!-- Ambient Hazy Sun -->
-        <a-sphere position="-100 40 -200" radius="25" material="color: #FFFACD; shader: flat; transparent: true; opacity: 0.9;"></a-sphere>
-        <a-light type="directional" color="#FFE4B5" intensity="1.4" position="-100 40 -200" castShadow="false"></a-light>
-        <a-light type="ambient" color="#FFDAB9" intensity="0.5"></a-light>
-        <a-light type="hemisphere" color="#FFFFFF" groundColor="#2E4C38" intensity="0.6"></a-light>
-
-        <!-- ========================================== -->
-        <!-- INSECT-SCALE ENVIRONMENT                   -->
-        <!-- ========================================== -->
-
-        <a-entity giant-trees></a-entity>
+        <!-- Environment -->
+        <a-entity milky-clouds></a-entity>
         <a-entity giant-flowers></a-entity>
         <a-entity giant-grass></a-entity>
         <a-entity fireflies></a-entity>
+        <a-plane position="0 0 0" rotation="-90 0 0" width="800" height="800" material="color: #2F4F4F; roughness: 1.0; metalness: 0.0;"></a-plane>
 
-        <!-- Soft Forest Floor -->
-        <a-plane position="0 0 0" rotation="-90 0 0" width="800" height="800" 
-                 material="color: #2F4F4F; roughness: 1.0; metalness: 0.0;"></a-plane>
-
-
-        <!-- ========================================== -->
-        <!-- SLEEK FLOATING INSTRUCTION PANEL           -->
-        <!-- ========================================== -->
-        <a-entity position="0 1.4 -1.2" rotation="-10 0 0">
-            <!-- Dark Glass Base -->
-            <a-plane width="1.1" height="0.55" 
-                     material="color: #111111; transparent: true; opacity: 0.75; shader: flat;" 
-                     position="0 0 0"></a-plane>
-            
-            <!-- Glowing Accent Line -->
-            <a-plane width="1.1" height="0.02" position="0 0.265 0.01"
-                     material="color: #FFB6C1; shader: flat;"></a-plane>
-
-            <!-- Typography -->
-            <a-text value="FLIGHT CONTROLS" 
-                    font="exo2bold" color="#FFFACD" width="1.8" position="0 0.18 0.02" align="center" letter-spacing="2"></a-text>
-            
-            <a-text value="PINCH to ignite thrusters." 
-                    font="roboto" color="#FFFFFF" width="1.1" position="-0.45 0.05 0.02" align="left"></a-text>
-            
-            <a-text value="STEER by pointing your hand out.\nThe further you reach, the faster you fly." 
-                    font="roboto" color="#AAAAAA" width="1.1" position="-0.45 -0.07 0.02" align="left"></a-text>
-            
-            <a-text value="RELEASE pinch to hover gracefully." 
-                    font="roboto" color="#FFB6C1" width="1.1" position="-0.45 -0.19 0.02" align="left"></a-text>
+        <!-- REVOLVING GEM ORBS -->
+        <a-entity class="grabbable" nectar-physics position="-1.0 1.2 -1.5">
+            <a-octahedron radius="0.12" material="color: #00FFAA; shader: flat; transparent: true; opacity: 0.85;" animation="property: rotation; to: 0 360 0; loop: true; dur: 3000; easing: linear;"></a-octahedron>
+            <a-torus radius="0.2" radius-tubular="0.005" material="color: #FFFFFF; shader: flat; transparent: true; opacity: 0.6;" animation="property: rotation; to: 360 360 0; loop: true; dur: 5000; easing: linear;"></a-torus>
         </a-entity>
 
+        <a-entity class="grabbable" nectar-physics position="0 1.2 -2.0">
+            <a-octahedron radius="0.12" material="color: #FF00AA; shader: flat; transparent: true; opacity: 0.85;" animation="property: rotation; to: 0 360 0; loop: true; dur: 3500; easing: linear;"></a-octahedron>
+            <a-torus radius="0.2" radius-tubular="0.005" material="color: #FFFFFF; shader: flat; transparent: true; opacity: 0.6;" animation="property: rotation; to: -360 -360 0; loop: true; dur: 4500; easing: linear;"></a-torus>
+        </a-entity>
 
-        <!-- ========================================== -->
-        <!-- PLAYER RIG                                 -->
-        <!-- ========================================== -->
+        <a-entity class="grabbable" nectar-physics position="1.0 1.2 -1.5">
+            <a-octahedron radius="0.12" material="color: #AA00FF; shader: flat; transparent: true; opacity: 0.85;" animation="property: rotation; to: 0 360 0; loop: true; dur: 4000; easing: linear;"></a-octahedron>
+            <a-torus radius="0.2" radius-tubular="0.005" material="color: #FFFFFF; shader: flat; transparent: true; opacity: 0.6;" animation="property: rotation; to: 360 0 360; loop: true; dur: 6000; easing: linear;"></a-torus>
+        </a-entity>
+
+        <!-- MAGIC CLAP EFFECTS -->
+        <a-torus id="magic-shockwave" radius="1" radius-tubular="0.05" rotation="90 0 0" 
+                 material="color: #FFFFFF; shader: flat; transparent: true; opacity: 0.0;" scale="0.1 0.1 0.1"
+                 animation__scale="property: scale; to: 30 30 30; dur: 800; easing: easeOutQuad; startEvents: fire-shockwave;"
+                 animation__fade="property: material.opacity; from: 1.0; to: 0.0; dur: 800; easing: easeOutQuad; startEvents: fire-shockwave;">
+        </a-torus>
         
-        <!-- Max speed increased to 45m/s to navigate the giant world gracefully -->
-        <a-entity id="rig" superman-flight="maxSpeed: 45.0; acceleration: 15.0; damping: 0.94;">
+        <a-entity id="lumina-system" lumina-sparkles></a-entity>
+
+        <!-- EMBELLISHED INSTRUCTION BOARD -->
+        <a-entity position="0 1.6 -1.6" rotation="-10 0 0">
+            <a-plane width="1.6" height="1.0" material="color: #FFFFFF; transparent: true; opacity: 0.15; roughness: 0.1; metalness: 0.8;" position="0 0 0"></a-plane>
+            <a-plane width="1.5" height="0.9" material="color: #111111; transparent: true; opacity: 0.6; shader: flat;" position="0 0 0.01"></a-plane>
+            <a-box width="1.64" height="1.04" depth="0.02" material="color: #FFD700; metalness: 0.8; roughness: 0.3;" position="0 0 -0.015"></a-box>
             
+            <a-cylinder radius="0.04" height="0.04" rotation="90 0 0" position="-0.8 0.5 0.02" material="color: #FFD700; metalness: 0.8; roughness: 0.2;"></a-cylinder>
+            <a-cylinder radius="0.04" height="0.04" rotation="90 0 0" position="0.8 0.5 0.02" material="color: #FFD700; metalness: 0.8; roughness: 0.2;"></a-cylinder>
+            <a-cylinder radius="0.04" height="0.04" rotation="90 0 0" position="-0.8 -0.5 0.02" material="color: #FFD700; metalness: 0.8; roughness: 0.2;"></a-cylinder>
+            <a-cylinder radius="0.04" height="0.04" rotation="90 0 0" position="0.8 -0.5 0.02" material="color: #FFD700; metalness: 0.8; roughness: 0.2;"></a-cylinder>
+
+            <a-text value="FLIGHT & MAGIC" font="exo2bold" color="#FFFACD" width="2.2" position="0 0.35 0.02" align="center" letter-spacing="2"></a-text>
+            <a-plane width="1.4" height="0.01" position="0 0.25 0.02" material="color: #FFD700; shader: flat;"></a-plane>
+            
+            <a-text value="FLYING:" font="exo2bold" color="#FFB6C1" width="1.2" position="-0.65 0.12 0.02"></a-text>
+            <a-text value="PINCH empty air to ignite thrusters.\nSTEER by pointing your hand out." font="roboto" color="#FFFFFF" width="1.2" position="-0.65 0.00 0.02"></a-text>
+            
+            <a-text value="GRABBING:" font="exo2bold" color="#00FFAA" width="1.2" position="-0.65 -0.15 0.02"></a-text>
+            <a-text value="PINCH near revolving gems to pick them up.\nRELEASE hand while moving to throw them!" font="roboto" color="#FFFFFF" width="1.2" position="-0.65 -0.27 0.02"></a-text>
+
+            <a-text value="MAGIC GESTURE: CLAP YOUR HANDS" font="exo2bold" color="#FFD700" width="1.2" position="0 -0.45 0.02" align="center"></a-text>
+        </a-entity>
+
+        <!-- PLAYER RIG & HANDS -->
+        <a-entity id="rig" superman-flight="maxSpeed: 45.0;">
             <a-camera id="camera" position="0 1.6 0"></a-camera>
-            
-            <a-entity id="leftHand" hand-tracking-controls="hand: left; modelStyle: dots; modelColor: #FFB6C1;"></a-entity>
-            <a-entity id="rightHand" hand-tracking-controls="hand: right; modelStyle: dots; modelColor: #FFB6C1;"></a-entity>
-            
+            <a-entity id="leftHand" hand-tracking-controls="hand: left; modelStyle: dots; modelColor: #FFB6C1;" hand-grabber></a-entity>
+            <a-entity id="rightHand" hand-tracking-controls="hand: right; modelStyle: dots; modelColor: #FFB6C1;" hand-grabber></a-entity>
         </a-entity>
 
     </a-scene>
